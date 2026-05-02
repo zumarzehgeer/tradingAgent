@@ -18,21 +18,23 @@ import {
 
 let stopRequested = false;
 
-// Below this BTC balance we treat the account as effectively empty (dust from
-// rounding, fees, etc.). Roughly $3 worth at typical BTC prices.
+// Roughly $3 at $60k BTC. If BTC price changes dramatically, adjust this value.
 const DUST_BTC = 0.00005;
 
 class FatalStateMismatch extends Error {}
 
 async function assertNoOrphanPosition(state: BotState): Promise<void> {
   if (state.position) return;
+  if (CONFIG.ignoreOrphanBtc) return;
   const btcFree = await getFreeBalance(CONFIG.baseAsset);
   if (btcFree > DUST_BTC) {
     throw new FatalStateMismatch(
-      `state.json shows no position but account holds ${btcFree} BTC. ` +
-        `This usually means a previous BUY succeeded but state failed to save. ` +
-        `Resolve manually: sell the BTC on Binance, then restart. ` +
-        `(If this BTC is unrelated to the bot, delete state.json and the bot will not stack on top of it — but you must accept that the bot will not manage that BTC.)`
+      `state.json shows no open position but account holds ${btcFree} BTC.\n` +
+        `  Path A — BTC is from this bot (saveState failed after a BUY):\n` +
+        `    Sell the BTC on Binance manually, then restart.\n` +
+        `  Path B — BTC is yours and unrelated to this bot (long-term holdings, etc.):\n` +
+        `    Set BINANCE_IGNORE_ORPHAN_BTC=true in .env, then restart.\n` +
+        `    The bot will not manage that BTC — it will only buy when its own signal fires.`
     );
   }
 }
@@ -97,6 +99,7 @@ async function executeSell(state: BotState, reason: string): Promise<BotState> {
 async function tick(): Promise<void> {
   let state = await loadState(CONFIG.stateFile);
   state = rolloverIfNewDay(state);
+  await assertNoOrphanPosition(state);
   state = await reconcile(state);
 
   const candles = await getCandles(CONFIG.pair, CONFIG.candleInterval, CONFIG.candleLookback);
@@ -160,7 +163,6 @@ async function main(): Promise<void> {
   );
 
   const startupState = await loadState(CONFIG.stateFile);
-  await assertNoOrphanPosition(startupState);
 
   if (startupState.position) {
     const ageMs = Date.now() - startupState.position.entryTimestamp;
@@ -202,5 +204,6 @@ async function main(): Promise<void> {
 
 main().catch((err) => {
   logger.error({ err: err instanceof Error ? err.message : err }, "fatal");
+  logger.flush();
   process.exit(1);
 });

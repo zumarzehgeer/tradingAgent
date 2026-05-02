@@ -176,6 +176,12 @@ export async function marketBuyUsdt(symbol: string, usdtAmount: number): Promise
   logger.info({ symbol, qty, estPrice: price, usdtAmount }, "submitting market BUY");
   const order: any = await client.marketBuy(symbol, qty);
   const fills = parseFills(order);
+  if (fills.qtyBase <= 0 || fills.fillPrice <= 0) {
+    throw new Error(
+      `BUY order ${order.orderId} returned zero fill (qtyBase=${fills.qtyBase}, fillPrice=${fills.fillPrice}). ` +
+        `State was NOT updated. Check Binance order history manually.`
+    );
+  }
   logger.info({ orderId: order.orderId, ...fills }, "BUY filled");
   return { orderId: order.orderId, ...fills };
 }
