@@ -48,6 +48,7 @@ async function loadFilters(symbol: string): Promise<SymbolFilters> {
   const sym = info.symbols.find((s: any) => s.symbol === symbol);
   if (!sym) throw new Error(`Symbol ${symbol} not found in exchangeInfo`);
   const lot = sym.filters.find((f: any) => f.filterType === "LOT_SIZE");
+  if (!lot) throw new Error(`No LOT_SIZE filter found for ${symbol}`);
   const notional = sym.filters.find(
     (f: any) => f.filterType === "MIN_NOTIONAL" || f.filterType === "NOTIONAL"
   );
@@ -195,6 +196,12 @@ export async function marketSellAll(symbol: string, qtyBase: number): Promise<Fi
   logger.info({ symbol, qty }, "submitting market SELL");
   const order: any = await client.marketSell(symbol, qty);
   const fills = parseFills(order);
+  if (fills.qtyBase <= 0 || fills.fillPrice <= 0) {
+    throw new Error(
+      `SELL order ${order.orderId} returned zero fill (qtyBase=${fills.qtyBase}, fillPrice=${fills.fillPrice}). ` +
+        `Position was NOT cleared. Check Binance order history manually.`
+    );
+  }
   logger.info({ orderId: order.orderId, ...fills }, "SELL filled");
   return { orderId: order.orderId, ...fills };
 }

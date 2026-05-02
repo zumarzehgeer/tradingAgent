@@ -102,8 +102,10 @@ async function tick(): Promise<void> {
   await assertNoOrphanPosition(state);
   state = await reconcile(state);
 
-  const candles = await getCandles(CONFIG.pair, CONFIG.candleInterval, CONFIG.candleLookback);
-  const price = await getPrice(CONFIG.pair);
+  const [candles, price] = await Promise.all([
+    getCandles(CONFIG.pair, CONFIG.candleInterval, CONFIG.candleLookback),
+    getPrice(CONFIG.pair),
+  ]);
 
   const risk = checkRisk(state, price, {
     stopLossPct: CONFIG.stopLossPct,
@@ -204,6 +206,5 @@ async function main(): Promise<void> {
 
 main().catch((err) => {
   logger.error({ err: err instanceof Error ? err.message : err }, "fatal");
-  logger.flush();
-  process.exit(1);
+  logger.flush(() => process.exit(1));
 });
