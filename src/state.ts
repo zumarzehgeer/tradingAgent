@@ -12,12 +12,14 @@ export interface BotState {
   position: OpenPosition | null;
   dayUtc: string;
   dailyRealizedPnlUsdt: number;
+  dailyTradeCount: number;
 }
 
 const EMPTY_STATE: BotState = {
   position: null,
   dayUtc: todayUtc(),
   dailyRealizedPnlUsdt: 0,
+  dailyTradeCount: 0,
 };
 
 export function todayUtc(): string {
@@ -39,6 +41,7 @@ export async function loadState(file: string): Promise<BotState> {
         : null,
       dayUtc: parsed.dayUtc ?? todayUtc(),
       dailyRealizedPnlUsdt: parsed.dailyRealizedPnlUsdt ?? 0,
+      dailyTradeCount: parsed.dailyTradeCount ?? 0,
     };
   } catch (err: any) {
     if (err.code === "ENOENT") return { ...EMPTY_STATE };
@@ -57,5 +60,5 @@ export async function saveState(file: string, state: BotState): Promise<void> {
 export function rolloverIfNewDay(state: BotState): BotState {
   const today = todayUtc();
   if (state.dayUtc === today) return state;
-  return { ...state, dayUtc: today, dailyRealizedPnlUsdt: 0 };
+  return { ...state, dayUtc: today, dailyRealizedPnlUsdt: 0, dailyTradeCount: 0 };
 }

@@ -93,6 +93,7 @@ async function executeSell(state: BotState, reason: string): Promise<BotState> {
     ...state,
     position: null,
     dailyRealizedPnlUsdt: state.dailyRealizedPnlUsdt + pnl,
+    dailyTradeCount: state.dailyTradeCount + 1,
   };
 }
 
@@ -127,13 +128,22 @@ async function tick(): Promise<void> {
     rsiOverbought: CONFIG.rsiOverbought,
   });
 
+  const unrealized = state.position
+    ? {
+        entryPrice: state.position.entryPrice,
+        unrealizedPnlUsdt: +((price - state.position.entryPrice) * state.position.qtyBtc).toFixed(4),
+        unrealizedPnlPct: +(((price - state.position.entryPrice) / state.position.entryPrice) * 100).toFixed(3),
+      }
+    : null;
+
   logger.info(
     {
       action: d.action,
       reason: d.reason,
       indicators: d.indicators,
-      dailyPnlUsdt: state.dailyRealizedPnlUsdt,
-      hasPosition: !!state.position,
+      dailyPnlUsdt: +state.dailyRealizedPnlUsdt.toFixed(4),
+      dailyTradeCount: state.dailyTradeCount,
+      ...(unrealized ? { unrealized } : {}),
     },
     "tick"
   );
