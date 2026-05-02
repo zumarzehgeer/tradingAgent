@@ -1,0 +1,61 @@
+# Dependencies
+node_modules/
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+
+# Build outputs and cache
+dist/
+build/
+out/
+dist-ssr/
+coverage/
+.turbo/
+.next/
+.vercel/
+.nuxt/
+
+# Compiled files
+*.tsbuildinfo
+*.min.js
+*.min.css
+*.map
+
+# Logs and debug
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Environment and secrets
+.env
+.env.*
+config.env
+*.pem
+*.key
+*.cert
+
+# IDE and OS
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# VCS internals
+.git/
+.husky/
+
+# Testing artifacts
+playwright-report/
+test-results/
+
+# Caches
+.cache/
+.eslintcache/
+__pycache__/
