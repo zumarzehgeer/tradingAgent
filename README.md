@@ -15,7 +15,7 @@ Edit `.env`:
 
 1. Generate **testnet** keys at <https://testnet.binance.vision/> (Binance login required, but no KYC).
 2. Paste them into `BINANCE_API_KEY` / `BINANCE_API_SECRET`.
-3. Keep `BINANCE_TESTNET=true` for now.
+3. Leave `BINANCE_LIVE=false` (or unset — anything except the exact string `"true"` keeps the bot on testnet).
 
 ## Run on testnet
 
@@ -37,8 +37,8 @@ Once you're confident:
 
 1. At <https://www.binance.com/en/my/settings/api-management>, generate live API keys with **Spot Trading enabled** and **withdrawals disabled**. IP-restrict if possible.
 2. In `.env`:
-   - Set `BINANCE_TESTNET=false`
-   - Replace `BINANCE_API_KEY` / `BINANCE_API_SECRET` with the live keys
+   - Set `BINANCE_LIVE=true` (the bot will print a 5-second warning banner before trading; Ctrl+C to abort).
+   - Replace `BINANCE_API_KEY` / `BINANCE_API_SECRET` with the live keys.
 3. Make sure your Binance account has at least ~$15 USDT free (a bit of buffer over the $10 trade size for fees + minNotional).
 4. `npm start` again. Watch the first hour closely.
 

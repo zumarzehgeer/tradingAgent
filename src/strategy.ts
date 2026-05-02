@@ -22,7 +22,17 @@ export interface StrategyParams {
   emaSlow: number;
   rsiPeriod: number;
   rsiOverbought: number;
+  rsiOversold: number;
 }
+
+const ZERO_INDICATORS = {
+  price: 0,
+  emaFast: 0,
+  emaSlow: 0,
+  emaFastPrev: 0,
+  emaSlowPrev: 0,
+  rsi: 0,
+};
 
 export function decide(
   candles: Candle[],
@@ -35,20 +45,24 @@ export function decide(
     return {
       action: "HOLD",
       reason: `not enough candles (have ${closes.length})`,
-      indicators: {
-        price: closes[closes.length - 1] ?? 0,
-        emaFast: 0,
-        emaSlow: 0,
-        emaFastPrev: 0,
-        emaSlowPrev: 0,
-        rsi: 0,
-      },
+      indicators: { ...ZERO_INDICATORS, price: closes[closes.length - 1] ?? 0 },
     };
   }
 
   const emaFastSeries = EMA.calculate({ period: params.emaFast, values: closes });
   const emaSlowSeries = EMA.calculate({ period: params.emaSlow, values: closes });
   const rsiSeries = RSI.calculate({ period: params.rsiPeriod, values: closes });
+
+  // technicalindicators warmup means series can be shorter than `closes`.
+  // Guard explicitly: we need at least 2 EMA points (to detect a cross) and
+  // 1 RSI point.
+  if (emaFastSeries.length < 2 || emaSlowSeries.length < 2 || rsiSeries.length < 1) {
+    return {
+      action: "HOLD",
+      reason: `indicator warmup incomplete (emaFast=${emaFastSeries.length}, emaSlow=${emaSlowSeries.length}, rsi=${rsiSeries.length})`,
+      indicators: { ...ZERO_INDICATORS, price: closes[closes.length - 1] ?? 0 },
+    };
+  }
 
   const emaFast = emaFastSeries[emaFastSeries.length - 1];
   const emaFastPrev = emaFastSeries[emaFastSeries.length - 2];
@@ -64,9 +78,20 @@ export function decide(
 
   if (position) {
     if (bearishCross) {
+      // Symmetric to the BUY filter: don't dump into oversold conditions
+      // on a bearish cross. The hard SL in risk.ts still protects against
+      // catastrophic downside; this just avoids selling the bottom on a
+      // momentary cross during a panic wick.
+      if (rsi <= params.rsiOversold) {
+        return {
+          action: "HOLD",
+          reason: `bearish cross blocked by RSI ${rsi.toFixed(1)} <= ${params.rsiOversold} (oversold)`,
+          indicators,
+        };
+      }
       return {
         action: "SELL",
-        reason: `bearish EMA cross (fast ${emaFast.toFixed(2)} < slow ${emaSlow.toFixed(2)})`,
+        reason: `bearish EMA cross (fast ${emaFast.toFixed(2)} < slow ${emaSlow.toFixed(2)}, rsi ${rsi.toFixed(1)})`,
         indicators,
       };
     }

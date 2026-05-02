@@ -37,10 +37,19 @@ export function checkRisk(
     }
   }
 
-  if (state.dailyRealizedPnlUsdt <= -params.dailyLossCapUsdt) {
+  // Daily loss cap counts BOTH realized PnL and unrealized PnL on any open
+  // position. If we counted only realized, a deeply underwater open position
+  // would not block new buys until SL closed it — by which point the cap
+  // would already be breached.
+  const unrealized = state.position
+    ? (currentPrice - state.position.entryPrice) * state.position.qtyBtc
+    : 0;
+  const totalDayPnl = state.dailyRealizedPnlUsdt + unrealized;
+
+  if (totalDayPnl <= -params.dailyLossCapUsdt) {
     return {
       action: "BLOCK_BUYS",
-      reason: `daily loss cap reached: ${state.dailyRealizedPnlUsdt.toFixed(2)} USDT (cap -${params.dailyLossCapUsdt})`,
+      reason: `daily loss cap reached: total ${totalDayPnl.toFixed(2)} USDT (realized ${state.dailyRealizedPnlUsdt.toFixed(2)} + unrealized ${unrealized.toFixed(2)}, cap -${params.dailyLossCapUsdt})`,
     };
   }
 
