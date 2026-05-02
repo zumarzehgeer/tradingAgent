@@ -1,0 +1,101 @@
+import { EMA, RSI } from "technicalindicators";
+import { Candle } from "./binance";
+import { OpenPosition } from "./state";
+
+export type Action = "BUY" | "SELL" | "HOLD";
+
+export interface Decision {
+  action: Action;
+  reason: string;
+  indicators: {
+    price: number;
+    emaFast: number;
+    emaSlow: number;
+    emaFastPrev: number;
+    emaSlowPrev: number;
+    rsi: number;
+  };
+}
+
+export interface StrategyParams {
+  emaFast: number;
+  emaSlow: number;
+  rsiPeriod: number;
+  rsiOverbought: number;
+}
+
+export function decide(
+  candles: Candle[],
+  position: OpenPosition | null,
+  params: StrategyParams
+): Decision {
+  const closes = candles.map((c) => c.close);
+
+  if (closes.length < params.emaSlow + 2 || closes.length < params.rsiPeriod + 2) {
+    return {
+      action: "HOLD",
+      reason: `not enough candles (have ${closes.length})`,
+      indicators: {
+        price: closes[closes.length - 1] ?? 0,
+        emaFast: 0,
+        emaSlow: 0,
+        emaFastPrev: 0,
+        emaSlowPrev: 0,
+        rsi: 0,
+      },
+    };
+  }
+
+  const emaFastSeries = EMA.calculate({ period: params.emaFast, values: closes });
+  const emaSlowSeries = EMA.calculate({ period: params.emaSlow, values: closes });
+  const rsiSeries = RSI.calculate({ period: params.rsiPeriod, values: closes });
+
+  const emaFast = emaFastSeries[emaFastSeries.length - 1];
+  const emaFastPrev = emaFastSeries[emaFastSeries.length - 2];
+  const emaSlow = emaSlowSeries[emaSlowSeries.length - 1];
+  const emaSlowPrev = emaSlowSeries[emaSlowSeries.length - 2];
+  const rsi = rsiSeries[rsiSeries.length - 1];
+  const price = closes[closes.length - 1];
+
+  const indicators = { price, emaFast, emaSlow, emaFastPrev, emaSlowPrev, rsi };
+
+  const bullishCross = emaFastPrev <= emaSlowPrev && emaFast > emaSlow;
+  const bearishCross = emaFastPrev >= emaSlowPrev && emaFast < emaSlow;
+
+  if (position) {
+    if (bearishCross) {
+      return {
+        action: "SELL",
+        reason: `bearish EMA cross (fast ${emaFast.toFixed(2)} < slow ${emaSlow.toFixed(2)})`,
+        indicators,
+      };
+    }
+    return {
+      action: "HOLD",
+      reason: `position open, no bearish cross (fast ${emaFast.toFixed(2)} vs slow ${emaSlow.toFixed(2)}, rsi ${rsi.toFixed(1)})`,
+      indicators,
+    };
+  }
+
+  if (bullishCross && rsi < params.rsiOverbought) {
+    return {
+      action: "BUY",
+      reason: `bullish EMA cross (fast ${emaFast.toFixed(2)} > slow ${emaSlow.toFixed(2)}), rsi ${rsi.toFixed(1)} < ${params.rsiOverbought}`,
+      indicators,
+    };
+  }
+
+  if (bullishCross) {
+    return {
+      action: "HOLD",
+      reason: `bullish cross blocked by RSI ${rsi.toFixed(1)} >= ${params.rsiOverbought}`,
+      indicators,
+    };
+  }
+
+  return {
+    action: "HOLD",
+    reason: `no signal (fast ${emaFast.toFixed(2)} vs slow ${emaSlow.toFixed(2)}, rsi ${rsi.toFixed(1)})`,
+    indicators,
+  };
+}

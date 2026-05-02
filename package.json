@@ -1,0 +1,28 @@
+{
+  "name": "trading-bot",
+  "version": "0.1.0",
+  "description": "Binance Spot BTC/USDT auto-trading bot (EMA crossover + RSI)",
+  "private": true,
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "ts-node src/index.ts",
+    "start:prod": "node dist/index.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "node-binance-api": "^0.13.1",
+    "pino": "^9.5.0",
+    "pino-pretty": "^11.3.0",
+    "technicalindicators": "^3.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.6.3"
+  }
+}
