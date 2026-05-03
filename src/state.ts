@@ -13,6 +13,7 @@ export interface BotState {
   dayUtc: string;
   dailyRealizedPnlUsdt: number;
   dailyTradeCount: number;
+  cooldownCandlesRemaining: number;
 }
 
 export class StateValidationError extends Error {}
@@ -27,6 +28,7 @@ export function emptyState(): BotState {
     dayUtc: todayUtc(),
     dailyRealizedPnlUsdt: 0,
     dailyTradeCount: 0,
+    cooldownCandlesRemaining: 0,
   };
 }
 
@@ -84,6 +86,10 @@ export async function loadState(file: string): Promise<BotState> {
     dayUtc: typeof p.dayUtc === "string" ? p.dayUtc : todayUtc(),
     dailyRealizedPnlUsdt: finite(p.dailyRealizedPnlUsdt ?? 0, "dailyRealizedPnlUsdt"),
     dailyTradeCount: finite(p.dailyTradeCount ?? 0, "dailyTradeCount"),
+    cooldownCandlesRemaining:
+      typeof p.cooldownCandlesRemaining === "number" && Number.isFinite(p.cooldownCandlesRemaining)
+        ? Math.max(0, Math.floor(p.cooldownCandlesRemaining))
+        : 0,
   };
 }
 
@@ -114,5 +120,7 @@ export async function saveState(file: string, state: BotState): Promise<void> {
 export function rolloverIfNewDay(state: BotState): BotState {
   const today = todayUtc();
   if (state.dayUtc === today) return state;
+  // cooldownCandlesRemaining intentionally NOT reset: a cooldown started at
+  // 23:59 should continue to protect the first ticks of the next UTC day.
   return { ...state, dayUtc: today, dailyRealizedPnlUsdt: 0, dailyTradeCount: 0 };
 }

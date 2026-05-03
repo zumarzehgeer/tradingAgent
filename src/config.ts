@@ -21,8 +21,37 @@ export const CONFIG = {
   emaFast: 9,
   emaSlow: 21,
   rsiPeriod: 14,
-  rsiOverbought: 70,
-  rsiOversold: 30,
+
+  // v2: 5m trend filter
+  emaTrend: 200,
+  trendInterval: "5m" as const,
+  trendCandleLookback: 220,
+
+  // v2: tighter RSI entry windows (replaces rsiOverbought/rsiOversold)
+  rsiBuyMin: 40,
+  rsiBuyMax: 65,
+  rsiSellMin: 35,
+  rsiSellMax: 60,
+
+  // v2: early exit — RSI flip threshold (for longs).
+  // Intentional 5-point gap vs rsiBuyMax (65): RSI 65–70 while in a trade is
+  // unguarded by the early-exit path; only a bearish EMA cross or hard SL/TP
+  // exits in that range. This avoids hair-trigger exits on normal post-entry
+  // RSI drift and only fires on genuine overbought spikes.
+  rsiEarlyExitLong: 70,
+
+  // v2: ATR volatility filter
+  atrPeriod: 14,
+  atrAveragingPeriod: 14,
+
+  // v2: no-trade zones
+  noTradeEma200BandPct: 0.005,
+  noTradeRsiMin: 45,
+  noTradeRsiMax: 55,
+  noTradeAtrMultiplier: 0.8,
+
+  // v2: post-trade cooldown (candles to wait after a trade closes)
+  cooldownCandles: 3,
 
   stopLossPct: 0.01,
   takeProfitPct: 0.02,

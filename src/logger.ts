@@ -40,7 +40,7 @@ export const logger = pino(
             // to avoid double-printing. The list below covers tick + buy/sell
             // logs; any other field passed to the logger will still render.
             ignore:
-              "pid,hostname,action,price,emaFast,emaSlow,rsi,dailyPnlUsdt,dailyTradeCount,entryPrice,unrealizedPnlUsdt,unrealizedPnlPct,reason,orderId,qty,fillPrice,qtyBase,qtyGross,baseCommission,quoteSpent,commissionUsdt,symbol,asset,knownAssets,src,consecutiveFailures",
+              "pid,hostname,action,price,emaFast,emaSlow,emaTrend,rsi,atr,atrAvg,cooldownCandlesRemaining,dailyPnlUsdt,dailyTradeCount,entryPrice,unrealizedPnlUsdt,unrealizedPnlPct,reason,orderId,qty,fillPrice,qtyBase,qtyGross,baseCommission,quoteSpent,commissionUsdt,symbol,asset,knownAssets,src,consecutiveFailures",
             singleLine: true,
           },
         },

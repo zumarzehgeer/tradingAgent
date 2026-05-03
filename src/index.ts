@@ -100,6 +100,7 @@ async function executeSell(state: BotState, reason: string): Promise<BotState> {
     position: null,
     dailyRealizedPnlUsdt: state.dailyRealizedPnlUsdt + pnl,
     dailyTradeCount: state.dailyTradeCount + 1,
+    cooldownCandlesRemaining: CONFIG.cooldownCandles,
   };
 }
 
@@ -108,6 +109,16 @@ async function tick(): Promise<void> {
   state = rolloverIfNewDay(state);
   await assertNoOrphanPosition(state);
   state = await reconcile(state);
+
+  // Capture pre-decrement value so the BUY block uses the same snapshot that
+  // determines whether the tick is cooling down. Decrement only while no
+  // position is open — cooldown is meant to delay re-entry after close, not
+  // drain during an active trade.
+  const cooldownRemaining = state.cooldownCandlesRemaining;
+  const isCoolingDown = !state.position && cooldownRemaining > 0;
+  if (isCoolingDown) {
+    state = { ...state, cooldownCandlesRemaining: cooldownRemaining - 1 };
+  }
 
   if (state.position) {
     const ageHours = (Date.now() - state.position.entryTimestamp) / (60 * 60 * 1000);
@@ -120,8 +131,9 @@ async function tick(): Promise<void> {
     }
   }
 
-  const [candles, price] = await Promise.all([
+  const [candles1m, candles5m, price] = await Promise.all([
     getCandles(CONFIG.pair, CONFIG.candleInterval, CONFIG.candleLookback),
+    getCandles(CONFIG.pair, CONFIG.trendInterval, CONFIG.trendCandleLookback),
     getPrice(CONFIG.pair),
   ]);
 
@@ -138,12 +150,22 @@ async function tick(): Promise<void> {
     return;
   }
 
-  const d = decide(candles, state.position, {
+  const d = decide(candles1m, candles5m, state.position, {
     emaFast: CONFIG.emaFast,
     emaSlow: CONFIG.emaSlow,
+    emaTrend: CONFIG.emaTrend,
     rsiPeriod: CONFIG.rsiPeriod,
-    rsiOverbought: CONFIG.rsiOverbought,
-    rsiOversold: CONFIG.rsiOversold,
+    atrPeriod: CONFIG.atrPeriod,
+    atrAveragingPeriod: CONFIG.atrAveragingPeriod,
+    rsiBuyMin: CONFIG.rsiBuyMin,
+    rsiBuyMax: CONFIG.rsiBuyMax,
+    rsiSellMin: CONFIG.rsiSellMin,
+    rsiSellMax: CONFIG.rsiSellMax,
+    rsiEarlyExitLong: CONFIG.rsiEarlyExitLong,
+    noTradeEma200BandPct: CONFIG.noTradeEma200BandPct,
+    noTradeRsiMin: CONFIG.noTradeRsiMin,
+    noTradeRsiMax: CONFIG.noTradeRsiMax,
+    noTradeAtrMultiplier: CONFIG.noTradeAtrMultiplier,
   });
 
   const unrealizedPct = state.position
@@ -158,7 +180,8 @@ async function tick(): Promise<void> {
     state.position && unrealizedPct !== null && unrealizedUsdt !== null
       ? ` | pos@${state.position.entryPrice.toFixed(2)} ${unrealizedPct >= 0 ? "+" : ""}${unrealizedPct.toFixed(2)}% (${unrealizedUsdt >= 0 ? "+" : ""}${unrealizedUsdt.toFixed(2)} USDT)`
       : "";
-  const prettyLine = `${d.action.padEnd(4)} ${d.indicators.price.toFixed(2)} | ema ${d.indicators.emaFast.toFixed(2)}${fastVsSlow}${d.indicators.emaSlow.toFixed(2)} rsi ${d.indicators.rsi.toFixed(1)} | day ${state.dailyRealizedPnlUsdt >= 0 ? "+" : ""}${state.dailyRealizedPnlUsdt.toFixed(2)} USDT (${state.dailyTradeCount} trades)${positionTag} — ${d.reason}`;
+  const cooldownTag = isCoolingDown ? ` [cooldown ${cooldownRemaining}]` : "";
+  const prettyLine = `${d.action.padEnd(4)} ${d.indicators.price.toFixed(2)} | ema ${d.indicators.emaFast.toFixed(2)}${fastVsSlow}${d.indicators.emaSlow.toFixed(2)} trend ${d.indicators.emaTrend.toFixed(2)} rsi ${d.indicators.rsi.toFixed(1)} atr ${d.indicators.atr.toFixed(2)} | day ${state.dailyRealizedPnlUsdt >= 0 ? "+" : ""}${state.dailyRealizedPnlUsdt.toFixed(2)} USDT (${state.dailyTradeCount} trades)${positionTag}${cooldownTag} — ${d.reason}`;
 
   // Pass both: structured fields (for JSON log aggregators that filter by
   // action/rsi/pnl) AND a human-readable msg (for pretty terminal output).
@@ -169,9 +192,13 @@ async function tick(): Promise<void> {
       price: d.indicators.price,
       emaFast: d.indicators.emaFast,
       emaSlow: d.indicators.emaSlow,
+      emaTrend: d.indicators.emaTrend,
       rsi: d.indicators.rsi,
+      atr: +d.indicators.atr.toFixed(4),
+      atrAvg: +d.indicators.atrAvg.toFixed(4),
       dailyPnlUsdt: +state.dailyRealizedPnlUsdt.toFixed(4),
       dailyTradeCount: state.dailyTradeCount,
+      cooldownCandlesRemaining: cooldownRemaining,
       ...(unrealizedPct !== null && unrealizedUsdt !== null && state.position
         ? {
             entryPrice: state.position.entryPrice,
@@ -185,11 +212,13 @@ async function tick(): Promise<void> {
   );
 
   if (d.action === "BUY") {
-    if (risk.action === "BLOCK_BUYS") {
+    if (isCoolingDown) {
+      logger.info({ cooldownCandlesRemaining: cooldownRemaining }, "BUY blocked by cooldown");
+    } else if (risk.action === "BLOCK_BUYS") {
       logger.warn({ reason: risk.reason }, "BUY blocked by risk");
-      return;
+    } else {
+      state = await executeBuy(state);
     }
-    state = await executeBuy(state);
   } else if (d.action === "SELL") {
     state = await executeSell(state, d.reason);
   }
@@ -215,7 +244,7 @@ async function main(): Promise<void> {
   const slPct = (CONFIG.stopLossPct * 100).toFixed(2);
   const tpPct = (CONFIG.takeProfitPct * 100).toFixed(2);
   logger.info(
-    `bot starting [${CONFIG.testnet ? "TESTNET" : "LIVE"}] ${CONFIG.pair} | size ${CONFIG.tradeSizeUsdt} USDT | SL -${slPct}% TP +${tpPct}% | daily cap ${CONFIG.dailyLossCapUsdt} USDT`
+    `bot starting [${CONFIG.testnet ? "TESTNET" : "LIVE"}] ${CONFIG.pair} | size ${CONFIG.tradeSizeUsdt} USDT | SL -${slPct}% TP +${tpPct}% | daily cap ${CONFIG.dailyLossCapUsdt} USDT | trend EMA${CONFIG.emaTrend} on ${CONFIG.trendInterval}`
   );
 
   process.on("SIGINT", () => {
