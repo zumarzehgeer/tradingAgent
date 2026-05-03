@@ -11,6 +11,9 @@ import {
 } from "./binance";
 import { decide } from "./strategy";
 import { checkRisk } from "./risk";
+import { loadModelGate } from "./model";
+import { ModelGate } from "./backtest/engine";
+import { extractFeatures, featureVector } from "./backtest/features";
 import {
   loadState,
   saveState,
@@ -20,8 +23,24 @@ import {
 } from "./state";
 
 let stopRequested = false;
+let modelGate: ModelGate | null = null;
 
 class FatalStateMismatch extends Error {}
+
+function applyModelGate(d: ReturnType<typeof decide>, candles1m: Parameters<typeof extractFeatures>[2]): { allow: boolean; pWin: number } {
+  if (!modelGate) return { allow: true, pWin: 1 };
+  const lastCandle = candles1m[candles1m.length - 1];
+  const features = extractFeatures(d, lastCandle, candles1m, CONFIG.adxPeriod ?? 14);
+  const vec = featureVector(features);
+  const { weights, means, stds, threshold } = modelGate;
+  let z = weights[weights.length - 1];
+  for (let k = 0; k < vec.length; k++) {
+    const stdSafe = stds[k] || 1;
+    z += weights[k] * ((vec[k] - means[k]) / stdSafe);
+  }
+  const pWin = 1 / (1 + Math.exp(-z));
+  return { allow: pWin >= threshold, pWin };
+}
 
 // Derive the orphan-BTC threshold from the live exchange step size rather
 // than a hardcoded constant. At step=0.00001, the threshold is 0.00002 — two
@@ -154,18 +173,17 @@ async function tick(): Promise<void> {
     emaFast: CONFIG.emaFast,
     emaSlow: CONFIG.emaSlow,
     emaTrend: CONFIG.emaTrend,
-    rsiPeriod: CONFIG.rsiPeriod,
+    emaFastTrend: CONFIG.emaFastTrend,
+    emaSlowTrend: CONFIG.emaSlowTrend,
     atrPeriod: CONFIG.atrPeriod,
     atrAveragingPeriod: CONFIG.atrAveragingPeriod,
-    rsiBuyMin: CONFIG.rsiBuyMin,
-    rsiBuyMax: CONFIG.rsiBuyMax,
-    rsiSellMin: CONFIG.rsiSellMin,
-    rsiSellMax: CONFIG.rsiSellMax,
-    rsiEarlyExitLong: CONFIG.rsiEarlyExitLong,
     noTradeEma200BandPct: CONFIG.noTradeEma200BandPct,
-    noTradeRsiMin: CONFIG.noTradeRsiMin,
-    noTradeRsiMax: CONFIG.noTradeRsiMax,
     noTradeAtrMultiplier: CONFIG.noTradeAtrMultiplier,
+    momentumConfirmPct: CONFIG.momentumConfirmPct,
+    crossoverLookback: CONFIG.crossoverLookback,
+    smartExitProfitPct: CONFIG.smartExitProfitPct,
+    adxPeriod: CONFIG.adxPeriod,
+    adxThreshold: CONFIG.adxThreshold,
   });
 
   const unrealizedPct = state.position
@@ -181,7 +199,7 @@ async function tick(): Promise<void> {
       ? ` | pos@${state.position.entryPrice.toFixed(2)} ${unrealizedPct >= 0 ? "+" : ""}${unrealizedPct.toFixed(2)}% (${unrealizedUsdt >= 0 ? "+" : ""}${unrealizedUsdt.toFixed(2)} USDT)`
       : "";
   const cooldownTag = isCoolingDown ? ` [cooldown ${cooldownRemaining}]` : "";
-  const prettyLine = `${d.action.padEnd(4)} ${d.indicators.price.toFixed(2)} | ema ${d.indicators.emaFast.toFixed(2)}${fastVsSlow}${d.indicators.emaSlow.toFixed(2)} trend ${d.indicators.emaTrend.toFixed(2)} rsi ${d.indicators.rsi.toFixed(1)} atr ${d.indicators.atr.toFixed(2)} | day ${state.dailyRealizedPnlUsdt >= 0 ? "+" : ""}${state.dailyRealizedPnlUsdt.toFixed(2)} USDT (${state.dailyTradeCount} trades)${positionTag}${cooldownTag} — ${d.reason}`;
+  const prettyLine = `${d.action.padEnd(4)} ${d.indicators.price.toFixed(2)} | ema ${d.indicators.emaFast.toFixed(2)}${fastVsSlow}${d.indicators.emaSlow.toFixed(2)} trend ${d.indicators.emaTrend.toFixed(2)} mom ${d.indicators.momentumPct.toFixed(3)}% atr ${d.indicators.atr.toFixed(2)} | day ${state.dailyRealizedPnlUsdt >= 0 ? "+" : ""}${state.dailyRealizedPnlUsdt.toFixed(2)} USDT (${state.dailyTradeCount} trades)${positionTag}${cooldownTag} — ${d.reason}`;
 
   // Pass both: structured fields (for JSON log aggregators that filter by
   // action/rsi/pnl) AND a human-readable msg (for pretty terminal output).
@@ -193,7 +211,9 @@ async function tick(): Promise<void> {
       emaFast: d.indicators.emaFast,
       emaSlow: d.indicators.emaSlow,
       emaTrend: d.indicators.emaTrend,
-      rsi: d.indicators.rsi,
+      emaFastTrend: d.indicators.emaFastTrend,
+      emaSlowTrend: d.indicators.emaSlowTrend,
+      momentumPct: +d.indicators.momentumPct.toFixed(4),
       atr: +d.indicators.atr.toFixed(4),
       atrAvg: +d.indicators.atrAvg.toFixed(4),
       dailyPnlUsdt: +state.dailyRealizedPnlUsdt.toFixed(4),
@@ -217,7 +237,18 @@ async function tick(): Promise<void> {
     } else if (risk.action === "BLOCK_BUYS") {
       logger.warn({ reason: risk.reason }, "BUY blocked by risk");
     } else {
-      state = await executeBuy(state);
+      const gate = applyModelGate(d, candles1m);
+      if (!gate.allow) {
+        logger.info(
+          { pWin: +gate.pWin.toFixed(4), threshold: modelGate?.threshold },
+          `BUY blocked by model gate: P(win)=${gate.pWin.toFixed(3)} < ${modelGate?.threshold}`
+        );
+      } else {
+        if (modelGate) {
+          logger.info({ pWin: +gate.pWin.toFixed(4) }, `BUY passed model gate: P(win)=${gate.pWin.toFixed(3)}`);
+        }
+        state = await executeBuy(state);
+      }
     }
   } else if (d.action === "SELL") {
     state = await executeSell(state, d.reason);
@@ -246,6 +277,21 @@ async function main(): Promise<void> {
   logger.info(
     `bot starting [${CONFIG.testnet ? "TESTNET" : "LIVE"}] ${CONFIG.pair} | size ${CONFIG.tradeSizeUsdt} USDT | SL -${slPct}% TP +${tpPct}% | daily cap ${CONFIG.dailyLossCapUsdt} USDT | trend EMA${CONFIG.emaTrend} on ${CONFIG.trendInterval}`
   );
+
+  if (CONFIG.useModelGate) {
+    modelGate = await loadModelGate(CONFIG.modelPath, CONFIG.modelThreshold);
+    if (modelGate) {
+      logger.info(
+        { threshold: modelGate.threshold, modelPath: CONFIG.modelPath },
+        `model gate active: P(win) >= ${modelGate.threshold} required for BUY`
+      );
+    } else {
+      logger.warn(
+        { modelPath: CONFIG.modelPath },
+        `useModelGate=true but no model file found — running without gate. Run "npm run train" to create one.`
+      );
+    }
+  }
 
   process.on("SIGINT", () => {
     logger.info("SIGINT received, will exit after current tick");

@@ -8,7 +8,12 @@
     "build": "tsc",
     "start": "ts-node src/index.ts",
     "start:prod": "node dist/index.js",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "backtest": "ts-node src/backtest/run.ts",
+    "sweep": "ts-node src/backtest/sweep.ts",
+    "analyze": "ts-node src/backtest/analysis.ts",
+    "train": "ts-node src/backtest/train.ts",
+    "walkforward": "ts-node src/backtest/walkforward.ts"
   },
   "engines": {
     "node": ">=20"
